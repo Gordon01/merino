@@ -11,6 +11,8 @@ use std::error::Error;
 use std::os::unix::prelude::MetadataExt;
 use std::path::PathBuf;
 
+mod bot;
+
 /// Logo to be printed at when merino is run
 const LOGO: &str = r"
                       _
@@ -158,9 +160,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut merino = Merino::new(opt.port, &opt.ip, auth_methods, authed_users, None).await?;
 
     //merino.add_to_whitelist(std::net::Ipv4Addr::new(195, 91, 225, 36).into());
+    let whitelist = merino.get_whitelist();
+    let rejected_addresses = merino.get_rejected_addresses();
 
-    // Start Proxies
-    merino.serve().await;
+    ctrlc::set_handler(move || {
+        println!("received Ctrl+C!");
+        std::process::exit(0);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    tokio::join!(
+        bot::start_bot(whitelist, rejected_addresses),
+        merino.serve()
+    );
 
     Ok(())
 }

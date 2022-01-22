@@ -1,8 +1,4 @@
-use crate::SOCKS_VERSION;
-use super::{
-    addr_to_socket, pretty_print_addr, AddrType, AuthMethods, MerinoError, ResponseCode, SOCKSReq,
-    SockCommand, SocksReply, User,
-};
+use crate::*;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;

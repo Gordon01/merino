@@ -7,7 +7,7 @@ use snafu::Snafu;
 
 use std::collections::HashSet;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, IpAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -238,11 +238,7 @@ impl Merino {
             let timeout = self.timeout.clone();
             let rejected_addresses = self.rejected_addresses.clone();
             let peer_ip = &stream.peer_addr().unwrap().ip();
-            let whitelisted = self
-                .whitelist
-                .read()
-                .unwrap()
-                .contains(peer_ip);
+            let whitelisted = self.whitelist.read().unwrap().contains(peer_ip);
 
             tokio::spawn(async move {
                 let mut client =
@@ -273,9 +269,17 @@ impl Merino {
     }
 
     /// Add provided address to the whitelist
-    pub fn add_to_whitelist(&mut self, addr: IpAddr) {
+    pub fn add_to_whitelist(&self, addr: IpAddr) {
         self.whitelist.write().unwrap().insert(addr);
         self.rejected_addresses.write().unwrap().remove(&addr);
+    }
+
+    pub fn get_whitelist(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
+        self.whitelist.clone()
+    }
+
+    pub fn get_rejected_addresses(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
+        self.rejected_addresses.clone()
     }
 }
 
