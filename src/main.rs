@@ -157,6 +157,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create proxy server
     let mut merino = Merino::new(opt.port, &opt.ip, auth_methods, authed_users, None).await?;
 
+    //merino.add_to_whitelist(std::net::Ipv4Addr::new(195, 91, 225, 36).into());
+
     // Start Proxies
     merino.serve().await;
 

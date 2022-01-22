@@ -5,9 +5,11 @@ extern crate serde_derive;
 extern crate log;
 use snafu::Snafu;
 
+use std::collections::HashSet;
 use std::io;
-use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs, IpAddr};
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -102,7 +104,7 @@ pub enum MerinoError {
     Socks(#[from] ResponseCode),
 }
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Snafu, PartialEq)]
 /// Possible SOCKS5 Response Codes
 pub enum ResponseCode {
     Success = 0x00,
@@ -200,7 +202,11 @@ pub struct Merino {
     listener: TcpListener,
     users: Arc<Vec<User>>,
     auth_methods: Arc<Vec<u8>>,
-    // Timeout for connections
+    /// All addresses, which merino rejected connections
+    rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
+    /// List of addresses, which would always have access to proxy
+    whitelist: Arc<RwLock<HashSet<IpAddr>>>,
+    /// Timeout for connections
     timeout: Option<Duration>,
 }
 
@@ -217,6 +223,8 @@ impl Merino {
         Ok(Merino {
             listener: TcpListener::bind((ip, port)).await?,
             auth_methods: Arc::new(auth_methods),
+            rejected_addresses: Arc::new(RwLock::new(HashSet::new())),
+            whitelist: Arc::new(RwLock::new(HashSet::new())), // TODO: persistent
             users: Arc::new(users),
             timeout,
         })
@@ -228,12 +236,27 @@ impl Merino {
             let users = self.users.clone();
             let auth_methods = self.auth_methods.clone();
             let timeout = self.timeout.clone();
+            let rejected_addresses = self.rejected_addresses.clone();
+            let peer_ip = &stream.peer_addr().unwrap().ip();
+            let whitelisted = self
+                .whitelist
+                .read()
+                .unwrap()
+                .contains(peer_ip);
+
             tokio::spawn(async move {
-                let mut client = auth::SOCKClient::new(stream, users, auth_methods, timeout);
+                let mut client =
+                    auth::SOCKClient::new(stream, users, auth_methods, whitelisted, timeout);
                 match client.init().await {
                     Ok(_) => {}
                     Err(error) => {
                         error!("Error! {:?}, client: {:?}", error, client_addr);
+
+                        if let MerinoError::Socks(e) = &error {
+                            if e == &ResponseCode::RuleFailure {
+                                rejected_addresses.write().unwrap().insert(client_addr.ip());
+                            }
+                        }
 
                         if let Err(e) = SocksReply::new(error.into()).send(&mut client.stream).await
                         {
@@ -247,6 +270,12 @@ impl Merino {
                 };
             });
         }
+    }
+
+    /// Add provided address to the whitelist
+    pub fn add_to_whitelist(&mut self, addr: IpAddr) {
+        self.whitelist.write().unwrap().insert(addr);
+        self.rejected_addresses.write().unwrap().remove(&addr);
     }
 }
 

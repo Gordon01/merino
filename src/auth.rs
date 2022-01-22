@@ -1,3 +1,4 @@
+use crate::SOCKS_VERSION;
 use super::{
     addr_to_socket, pretty_print_addr, AddrType, AuthMethods, MerinoError, ResponseCode, SOCKSReq,
     SockCommand, SocksReply, User,
@@ -14,6 +15,7 @@ pub struct SOCKClient<T: AsyncRead + AsyncWrite + Send + Unpin + 'static> {
     auth_nmethods: u8,
     auth_methods: Arc<Vec<u8>>,
     authed_users: Arc<Vec<User>>,
+    whitelisted: bool,
     socks_version: u8,
     timeout: Option<Duration>,
 }
@@ -27,6 +29,7 @@ where
         stream: T,
         authed_users: Arc<Vec<User>>,
         auth_methods: Arc<Vec<u8>>,
+        whitelisted: bool,
         timeout: Option<Duration>,
     ) -> Self {
         SOCKClient {
@@ -35,6 +38,7 @@ where
             socks_version: 0,
             authed_users,
             auth_methods,
+            whitelisted,
             timeout,
         }
     }
@@ -53,6 +57,7 @@ where
             socks_version: 0,
             authed_users,
             auth_methods,
+            whitelisted: false,
             timeout,
         }
     }
@@ -113,7 +118,7 @@ where
         let mut response = [0u8; 2];
 
         // Set the version in the response
-        response[0] = super::SOCKS_VERSION;
+        response[0] = SOCKS_VERSION;
 
         if methods.contains(&(AuthMethods::UserPass as u8)) {
             // Set the default auth method (NO AUTH)
@@ -176,7 +181,7 @@ where
             self.stream.write_all(&response).await?;
             self.shutdown().await?;
 
-            Err(MerinoError::Socks(ResponseCode::Failure))
+            Err(MerinoError::Socks(ResponseCode::RuleFailure))
         }
     }
 
@@ -258,6 +263,14 @@ where
                 methods.append(&mut method.to_vec());
             }
         }
+
+        // Add NoAuth method if peer is whitelisted to allow connection in every confiuration
+        let no_auth = super::AuthMethods::NoAuth as u8;
+        if self.whitelisted && !methods.contains(&no_auth) {
+            debug!("Client is whitelisted");
+            methods.push(no_auth);
+        }
+
         Ok(methods)
     }
 }
