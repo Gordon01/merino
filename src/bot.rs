@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::error::Error;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, RwLock};
 use teloxide::{prelude::*, utils::command::BotCommand};
@@ -12,6 +14,8 @@ enum Command {
     Help,
     #[command(description = "show all rejected addresses")]
     Rejected,
+    #[command(description = "show all whitelisted addresses")]
+    Whitelist,
     #[command(description = "add ip to whitelist.")]
     Add(String),
 }
@@ -43,15 +47,36 @@ async fn message_handler(
                     ))
                     .await?;
                 }
+                Ok(Command::Whitelist) => {
+                    cx.answer(format!(
+                        "There are {} addresses in whitelist:\n{}",
+                        whitelist.read().unwrap().len(),
+                        whitelist
+                            .read()
+                            .unwrap()
+                            .iter()
+                            .map(|a| format!("{}\n", a.to_string()))
+                            .collect::<String>()
+                    ))
+                    .await?;
+                }
                 Ok(Command::Add(ip)) => match ip.parse::<IpAddr>() {
                     Ok(ip) => {
-                        whitelist.write().unwrap().insert(ip);
-                        cx.answer(format!("IP {} is added to whitelist", ip))
-                            .await?;
+                        /*let mut whitelist = whitelist.write().unwrap();
+                        if whitelist.read().unwrap().contains(&ip) {
+                            cx.answer(format!("IP {} is already in whitelist", ip))
+                                .await?;
+                        } else { */
+                            let mut file = OpenOptions::new().append(true).open("whitelist")?;
+                            file.write(format!("\n{}", ip).as_bytes());
+                            whitelist.write().unwrap().insert(ip);
+                            let message = format!("IP {} is added to whitelist", ip);
+                            info!("{}", message);
+                            cx.answer(message).await?;
+                        //}
                     }
                     Err(e) => {
-                        cx.answer(format!("IP cannot be parsed: {}", e))
-                            .await?;
+                        cx.answer(format!("IP cannot be parsed: {}", e)).await?;
                     }
                 },
 
@@ -71,6 +96,8 @@ pub async fn start_bot(
     rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
 ) {
     let bot = Bot::from_env().auto_send();
+
+    info!("Starting telegram bot...");
 
     //let bot_name: String = "merino_bot".to_string();
     //teloxide::commands_repl(bot, bot_name, answer).await;

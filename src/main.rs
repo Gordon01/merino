@@ -63,6 +63,10 @@ struct Opt {
     /// Do not output any logs (even errors!). Overrides `RUST_LOG`
     #[clap(short)]
     quiet: bool,
+
+    /// Enable management via the Telegram bot
+    #[clap(short, long)]
+    bot: Option<String>,
 }
 
 #[tokio::main]
@@ -169,10 +173,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    tokio::join!(
-        bot::start_bot(whitelist, rejected_addresses),
-        merino.serve()
-    );
+    if let Some(whitelist_path) = opt.bot {
+        merino.load_whitelist(whitelist_path);
+        tokio::join!(
+            bot::start_bot(whitelist, rejected_addresses),
+            merino.serve()
+        );
+    } else {
+        merino.serve().await;
+    }
 
     Ok(())
 }

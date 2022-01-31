@@ -6,8 +6,9 @@ extern crate log;
 use snafu::Snafu;
 
 use std::collections::HashSet;
-use std::io;
+use std::io::{self, BufReader, BufRead};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -206,6 +207,8 @@ pub struct Merino {
     rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
     /// List of addresses, which would always have access to proxy
     whitelist: Arc<RwLock<HashSet<IpAddr>>>,
+    /// Path to the whitelist file
+    whitelist_file: Option<PathBuf>,
     /// Timeout for connections
     timeout: Option<Duration>,
 }
@@ -224,7 +227,8 @@ impl Merino {
             listener: TcpListener::bind((ip, port)).await?,
             auth_methods: Arc::new(auth_methods),
             rejected_addresses: Arc::new(RwLock::new(HashSet::new())),
-            whitelist: Arc::new(RwLock::new(HashSet::new())), // TODO: persistent
+            whitelist: Arc::new(RwLock::new(HashSet::new())),
+            whitelist_file: None,
             users: Arc::new(users),
             timeout,
         })
@@ -269,13 +273,46 @@ impl Merino {
     }
 
     /// Add provided address to the whitelist
-    pub fn add_to_whitelist(&self, addr: IpAddr) {
+    fn add_to_whitelist(&self, addr: IpAddr, write: bool) {
+        if write && self.whitelist_file.is_some() {
+            // TODO: Implement file write
+        }
         self.whitelist.write().unwrap().insert(addr);
         self.rejected_addresses.write().unwrap().remove(&addr);
     }
 
     pub fn get_whitelist(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
         self.whitelist.clone()
+    }
+
+    pub fn load_whitelist(&mut self, path: String) {
+        let path = PathBuf::from(path);
+        let file = std::fs::File::open(&path).unwrap_or_else(|e| {
+            error!("Can't open whitelist file {:?}: {}", &path, e);
+            std::process::exit(1);
+        });
+        let reader = BufReader::new(file);
+
+        let mut whitelist = self.whitelist.write().unwrap();
+
+        for line in reader.lines() {
+            // no idea why this may fail
+            let line = line.unwrap();
+            match line.parse::<IpAddr>() {
+                Ok(ip) => {
+                    if !whitelist.contains(&ip) {
+                        whitelist.insert(ip);
+                        info!("IP loaded from whitelist file: {}", ip);
+                    }
+                }
+                Err(e) => {
+                    warn!("IP {} cannot be parsed: {}", line, e);
+                    continue;
+                }
+            };
+        }
+
+        self.whitelist_file = Some(path);
     }
 
     pub fn get_rejected_addresses(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
