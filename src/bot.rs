@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use teloxide::{prelude::*, utils::command::BotCommand};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -27,65 +27,75 @@ async fn message_handler(
     whitelist: Arc<RwLock<HashSet<IpAddr>>>,
     rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    match cx.update.text() {
-        Some(text) => {
-            match BotCommand::parse(text, "buttons") {
-                Ok(Command::Help) => {
-                    // Just send the description of all commands.
-                    cx.answer(Command::descriptions()).await?;
-                }
-                Ok(Command::Rejected) => {
-                    cx.answer(format!(
-                        "There are {} rejected addresses:\n{}",
-                        rejected_addresses.read().unwrap().len(),
-                        rejected_addresses
-                            .read()
-                            .unwrap()
-                            .iter()
-                            .map(|a| format!("{}\n", a.to_string()))
-                            .collect::<String>()
-                    ))
-                    .await?;
-                }
-                Ok(Command::Whitelist) => {
-                    cx.answer(format!(
-                        "There are {} addresses in whitelist:\n{}",
-                        whitelist.read().unwrap().len(),
-                        whitelist
-                            .read()
-                            .unwrap()
-                            .iter()
-                            .map(|a| format!("{}\n", a.to_string()))
-                            .collect::<String>()
-                    ))
-                    .await?;
-                }
-                Ok(Command::Add(ip)) => match ip.parse::<IpAddr>() {
-                    Ok(ip) => {
-                        /*let mut whitelist = whitelist.write().unwrap();
-                        if whitelist.read().unwrap().contains(&ip) {
-                            cx.answer(format!("IP {} is already in whitelist", ip))
-                                .await?;
-                        } else { */
-                            let mut file = OpenOptions::new().append(true).open("whitelist")?;
-                            file.write(format!("\n{}", ip).as_bytes());
-                            whitelist.write().unwrap().insert(ip);
-                            let message = format!("IP {} is added to whitelist", ip);
-                            info!("{}", message);
-                            cx.answer(message).await?;
-                        //}
-                    }
-                    Err(e) => {
-                        cx.answer(format!("IP cannot be parsed: {}", e)).await?;
-                    }
-                },
+    if let Some(text) = cx.update.text() {
+        match BotCommand::parse(text, "buttons") {
+            Ok(Command::Help) => {
+                // Just send the description of all commands.
+                cx.answer(Command::descriptions()).await?;
+            }
+            Ok(Command::Rejected) => {
+                cx.answer(format!(
+                    "There are {} rejected addresses:\n{}",
+                    rejected_addresses.read().unwrap().len(),
+                    rejected_addresses
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .map(|a| format!("{}\n", a))
+                        .collect::<String>()
+                ))
+                .await?;
+            }
+            Ok(Command::Whitelist) => {
+                cx.answer(format!(
+                    "There are {} addresses in whitelist:\n{}",
+                    whitelist.read().unwrap().len(),
+                    whitelist
+                        .read()
+                        .unwrap()
+                        .iter()
+                        .map(|a| format!("{}\n", a))
+                        .collect::<String>()
+                ))
+                .await?;
+            }
+            Ok(Command::Add(ip)) => match ip.parse::<IpAddr>() {
+                Ok(ip) => {
+                    let contains = {
+                        let mut whitelist = whitelist.write().unwrap();
+                        let contains = whitelist.contains(&ip);
+                        whitelist.insert(ip);
+                        contains
+                    };
+                    if contains {
+                        cx.answer(format!("IP {} is already in whitelist", ip))
+                            .await?;
+                    } else {
+                        let message: String = {
+                            let file = OpenOptions::new().append(true).open("whitelist");
+                            if file.is_err() {
+                                format!("IP {} is added to whitelist, but not saved to file", ip)
+                            } else {
+                                match file.unwrap().write(format!("\n{}", ip).as_bytes()) {
+                                        Ok(_) => format!("IP {} is added to whitelist", ip),
+                                        Err(e) => format!("IP {} is added to whitelist, but not saved to file, because: {:?}", ip, e),
+                                    }
+                            }
+                        };
 
-                Ok(_) | Err(_) => {
-                    cx.reply_to("Command not found!").await?;
+                        info!("{}", message);
+                        cx.answer(message).await?;
+                    }
                 }
+                Err(e) => {
+                    cx.answer(format!("IP cannot be parsed: {}", e)).await?;
+                }
+            },
+
+            Err(_) => {
+                cx.reply_to("Command not found!").await?;
             }
         }
-        None => {}
     }
 
     Ok(())

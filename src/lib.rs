@@ -1,4 +1,3 @@
-#![forbid(unsafe_code)]
 #[macro_use]
 extern crate serde_derive;
 #[macro_use]
@@ -6,9 +5,9 @@ extern crate log;
 use snafu::Snafu;
 
 use std::collections::HashSet;
-use std::io::{self, BufReader, BufRead};
+use std::io::{self, BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -239,7 +238,7 @@ impl Merino {
         while let Ok((stream, client_addr)) = self.listener.accept().await {
             let users = self.users.clone();
             let auth_methods = self.auth_methods.clone();
-            let timeout = self.timeout.clone();
+            let timeout = self.timeout;
             let rejected_addresses = self.rejected_addresses.clone();
             let peer_ip = &stream.peer_addr().unwrap().ip();
             let whitelisted = self.whitelist.read().unwrap().contains(peer_ip);
@@ -270,15 +269,6 @@ impl Merino {
                 };
             });
         }
-    }
-
-    /// Add provided address to the whitelist
-    fn add_to_whitelist(&self, addr: IpAddr, write: bool) {
-        if write && self.whitelist_file.is_some() {
-            // TODO: Implement file write
-        }
-        self.whitelist.write().unwrap().insert(addr);
-        self.rejected_addresses.write().unwrap().remove(&addr);
     }
 
     pub fn get_whitelist(&self) -> Arc<RwLock<HashSet<IpAddr>>> {

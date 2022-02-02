@@ -43,8 +43,7 @@ where
     pub fn new_no_auth(stream: T, timeout: Option<Duration>) -> Self {
         // FIXME: use option here
         let authed_users: Arc<Vec<User>> = Arc::new(Vec::new());
-        let mut no_auth: Vec<u8> = Vec::new();
-        no_auth.push(AuthMethods::NoAuth as u8);
+        let no_auth: Vec<u8> = vec![AuthMethods::NoAuth as u8];
         let auth_methods: Arc<Vec<u8>> = Arc::new(no_auth);
 
         SOCKClient {
