@@ -9,7 +9,7 @@ use merino::*;
 use std::env;
 use std::error::Error;
 use std::os::unix::prelude::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod bot;
 
@@ -174,9 +174,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .expect("Error setting Ctrl-C handler");
 
     if let Some(whitelist_path) = opt.bot {
-        merino.load_whitelist(whitelist_path);
+        let path = Path::new(&whitelist_path);
+        merino.load_whitelist(path);
         tokio::join!(
-            bot::start_bot(whitelist, rejected_addresses),
+            bot::start_bot(whitelist, rejected_addresses, path.into()),
             merino.serve()
         );
     } else {

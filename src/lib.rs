@@ -5,9 +5,10 @@ extern crate log;
 use snafu::Snafu;
 
 use std::collections::HashSet;
+use std::fs::OpenOptions;
 use std::io::{self, BufRead, BufReader};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::time::Duration;
@@ -241,6 +242,8 @@ impl Merino {
             let timeout = self.timeout;
             let rejected_addresses = self.rejected_addresses.clone();
             let peer_ip = &stream.peer_addr().unwrap().ip();
+            // On Linux readeres preferred before writers. This shouls also immidiately release the lock.
+            // TODO: measure the delay
             let whitelisted = self.whitelist.read().unwrap().contains(peer_ip);
 
             tokio::spawn(async move {
@@ -275,34 +278,38 @@ impl Merino {
         self.whitelist.clone()
     }
 
-    pub fn load_whitelist(&mut self, path: String) {
-        let path = PathBuf::from(path);
-        let file = std::fs::File::open(&path).unwrap_or_else(|e| {
-            error!("Can't open whitelist file {:?}: {}", &path, e);
-            std::process::exit(1);
-        });
-        let reader = BufReader::new(file);
+    pub fn load_whitelist(&mut self, path: &Path) {
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap_or_else(|e| {
+                error!("Can't open whitelist file {:?} for writing: {}", &path, e);
+                std::process::exit(1);
+            });
 
+        let reader = BufReader::new(file);
         let mut whitelist = self.whitelist.write().unwrap();
 
         for line in reader.lines() {
-            // no idea why this may fail
-            let line = line.unwrap();
-            match line.parse::<IpAddr>() {
-                Ok(ip) => {
-                    if !whitelist.contains(&ip) {
-                        whitelist.insert(ip);
-                        info!("IP loaded from whitelist file: {}", ip);
+            if let Ok(line) = line {
+                match line.parse::<IpAddr>() {
+                    Ok(ip) => {
+                        if !whitelist.contains(&ip) {
+                            whitelist.insert(ip);
+                            info!("IP loaded from whitelist file: {}", ip);
+                        }
                     }
-                }
-                Err(e) => {
-                    warn!("IP {} cannot be parsed: {}", line, e);
-                    continue;
-                }
-            };
+                    Err(e) => {
+                        warn!("IP {} cannot be parsed: {}", line, e);
+                        continue;
+                    }
+                };
+            }
         }
 
-        self.whitelist_file = Some(path);
+        self.whitelist_file = Some(path.to_path_buf());
     }
 
     pub fn get_rejected_addresses(&self) -> Arc<RwLock<HashSet<IpAddr>>> {

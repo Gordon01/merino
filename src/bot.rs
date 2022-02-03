@@ -3,6 +3,7 @@ use std::error::Error;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::IpAddr;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 use teloxide::{prelude::*, utils::command::BotCommand};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -26,15 +27,16 @@ async fn message_handler(
     cx: UpdateWithCx<AutoSend<Bot>, Message>,
     whitelist: Arc<RwLock<HashSet<IpAddr>>>,
     rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
+    whitelist_file: Arc<Path>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = cx.update.text() {
-        match BotCommand::parse(text, "buttons") {
+        let message = match BotCommand::parse(text, "buttons") {
             Ok(Command::Help) => {
                 // Just send the description of all commands.
-                cx.answer(Command::descriptions()).await?;
+                Command::descriptions()
             }
             Ok(Command::Rejected) => {
-                cx.answer(format!(
+                format!(
                     "There are {} rejected addresses:\n{}",
                     rejected_addresses.read().unwrap().len(),
                     rejected_addresses
@@ -43,11 +45,10 @@ async fn message_handler(
                         .iter()
                         .map(|a| format!("{}\n", a))
                         .collect::<String>()
-                ))
-                .await?;
+                )
             }
             Ok(Command::Whitelist) => {
-                cx.answer(format!(
+                format!(
                     "There are {} addresses in whitelist:\n{}",
                     whitelist.read().unwrap().len(),
                     whitelist
@@ -56,8 +57,7 @@ async fn message_handler(
                         .iter()
                         .map(|a| format!("{}\n", a))
                         .collect::<String>()
-                ))
-                .await?;
+                )
             }
             Ok(Command::Add(ip)) => match ip.parse::<IpAddr>() {
                 Ok(ip) => {
@@ -68,11 +68,10 @@ async fn message_handler(
                         contains
                     };
                     if contains {
-                        cx.answer(format!("IP {} is already in whitelist", ip))
-                            .await?;
+                        format!("IP {} is already in whitelist", ip)
                     } else {
                         let message: String = {
-                            let file = OpenOptions::new().append(true).open("whitelist");
+                            let file = OpenOptions::new().append(true).open(whitelist_file);
                             if file.is_err() {
                                 format!("IP {} is added to whitelist, but not saved to file", ip)
                             } else {
@@ -84,18 +83,20 @@ async fn message_handler(
                         };
 
                         info!("{}", message);
-                        cx.answer(message).await?;
+                        message
                     }
                 }
                 Err(e) => {
-                    cx.answer(format!("IP cannot be parsed: {}", e)).await?;
+                    format!("IP cannot be parsed: {}", e)
                 }
             },
 
             Err(_) => {
-                cx.reply_to("Command not found!").await?;
+                "Command not found!".to_string()
             }
-        }
+        };
+
+        cx.reply_to(message).await?;
     }
 
     Ok(())
@@ -104,20 +105,20 @@ async fn message_handler(
 pub async fn start_bot(
     whitelist: Arc<RwLock<HashSet<IpAddr>>>,
     rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
+    whitelist_file: Arc<Path>,
 ) {
     let bot = Bot::from_env().auto_send();
 
     info!("Starting telegram bot...");
 
-    //let bot_name: String = "merino_bot".to_string();
-    //teloxide::commands_repl(bot, bot_name, answer).await;
     Dispatcher::new(bot)
         .messages_handler(|rx: DispatcherHandlerRx<AutoSend<Bot>, Message>| {
             UnboundedReceiverStream::new(rx).for_each_concurrent(None, move |cx| {
                 let whitelist = whitelist.clone();
                 let rejected = rejected_addresses.clone();
+                let whitelist_file = whitelist_file.clone();
                 async move {
-                    message_handler(cx, whitelist, rejected)
+                    message_handler(cx, whitelist, rejected, whitelist_file)
                         .await
                         .log_on_error()
                         .await;
