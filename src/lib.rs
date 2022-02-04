@@ -199,83 +199,69 @@ pub enum AuthMethods {
     NoMethods = 0xFF,
 }
 
-pub struct Merino {
-    listener: TcpListener,
-    users: Arc<Vec<User>>,
-    auth_methods: Arc<Vec<u8>>,
+pub struct Lists {
     /// All addresses, which merino rejected connections
-    rejected_addresses: Arc<RwLock<HashSet<IpAddr>>>,
+    rejected: RwLock<HashSet<IpAddr>>,
     /// List of addresses, which would always have access to proxy
-    whitelist: Arc<RwLock<HashSet<IpAddr>>>,
+    whitelist: RwLock<HashSet<IpAddr>>,
     /// Path to the whitelist file
     whitelist_file: Option<PathBuf>,
-    /// Timeout for connections
-    timeout: Option<Duration>,
 }
 
-impl Merino {
-    /// Create a new Merino instance
-    pub async fn new(
-        port: u16,
-        ip: &str,
-        auth_methods: Vec<u8>,
-        users: Vec<User>,
-        timeout: Option<Duration>,
-    ) -> io::Result<Self> {
-        info!("Listening on {}:{}", ip, port);
-        Ok(Merino {
-            listener: TcpListener::bind((ip, port)).await?,
-            auth_methods: Arc::new(auth_methods),
-            rejected_addresses: Arc::new(RwLock::new(HashSet::new())),
-            whitelist: Arc::new(RwLock::new(HashSet::new())),
+impl Lists {
+    pub fn new() -> Self {
+        Self {
+            rejected: RwLock::new(HashSet::new()),
+            whitelist: RwLock::new(HashSet::new()),
             whitelist_file: None,
-            users: Arc::new(users),
-            timeout,
-        })
-    }
-
-    pub async fn serve(&mut self) {
-        info!("Serving Connections...");
-        while let Ok((stream, client_addr)) = self.listener.accept().await {
-            let users = self.users.clone();
-            let auth_methods = self.auth_methods.clone();
-            let timeout = self.timeout;
-            let rejected_addresses = self.rejected_addresses.clone();
-            let peer_ip = &stream.peer_addr().unwrap().ip();
-            // On Linux readeres preferred before writers. This shouls also immidiately release the lock.
-            // TODO: measure the delay
-            let whitelisted = self.whitelist.read().unwrap().contains(peer_ip);
-
-            tokio::spawn(async move {
-                let mut client =
-                    auth::SOCKClient::new(stream, users, auth_methods, whitelisted, timeout);
-                match client.init().await {
-                    Ok(_) => {}
-                    Err(error) => {
-                        error!("Error! {:?}, client: {:?}", error, client_addr);
-
-                        if let MerinoError::Socks(e) = &error {
-                            if e == &ResponseCode::RuleFailure {
-                                rejected_addresses.write().unwrap().insert(client_addr.ip());
-                            }
-                        }
-
-                        if let Err(e) = SocksReply::new(error.into()).send(&mut client.stream).await
-                        {
-                            warn!("Failed to send error code: {:?}", e);
-                        }
-
-                        if let Err(e) = client.shutdown().await {
-                            warn!("Failed to shutdown TcpStream: {:?}", e);
-                        };
-                    }
-                };
-            });
         }
     }
 
-    pub fn get_whitelist(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
-        self.whitelist.clone()
+    pub fn add_to_whitelist(&self, ip: &IpAddr) -> String {
+        let contains = {
+            let mut whitelist = self.whitelist.write().unwrap();
+            let contains = whitelist.contains(&ip);
+            whitelist.insert(*ip);
+            //lists.add_to_whitelist(&ip);
+            contains
+        };
+        if contains {
+            format!("IP {} is already in whitelist", ip)
+        } else {
+            /*
+            // Deal with async file writing
+            let message: String = {
+                let file = OpenOptions::new().append(true).open(self.whitelist_file);
+                if file.is_err() {
+                    format!("IP {} is added to whitelist, but not saved to file", ip)
+                } else {
+                    match file.unwrap().write(format!("\n{}", ip).as_bytes()) {
+                            Ok(_) => format!("IP {} is added to whitelist", ip),
+                            Err(e) => format!("IP {} is added to whitelist, but not saved to file, because: {:?}", ip, e),
+                        }
+                }
+            };
+            */
+            let message = "File writing is  not implemented, but IP is added";
+            info!("{}", message);
+            message.to_string()
+        }
+
+        /*
+        let mut whitelist = self.whitelist.write().unwrap();
+        whitelist.insert(*ip);
+        info!("Whitelist: {:?}", whitelist);
+        */
+    }
+
+    pub fn add_to_rejected(&self, ip: &IpAddr) {
+        let mut rejected = self.rejected.write().unwrap();
+        rejected.insert(*ip);
+        info!("Eejected: {:?}", rejected);
+    }
+
+    pub fn is_whitelisted(&self, ip: &IpAddr) -> bool {
+        self.whitelist.read().unwrap().contains(ip)
     }
 
     pub fn load_whitelist(&mut self, path: &Path) {
@@ -309,11 +295,107 @@ impl Merino {
             }
         }
 
-        self.whitelist_file = Some(path.to_path_buf());
+        //self.whitelist_file = Some(path.to_path_buf());
     }
 
-    pub fn get_rejected_addresses(&self) -> Arc<RwLock<HashSet<IpAddr>>> {
-        self.rejected_addresses.clone()
+    pub fn print_rejected(&self) -> String {
+        format!(
+            "There are {} rejected addresses:\n{}",
+            self.rejected.read().unwrap().len(),
+            self.rejected
+                .read()
+                .unwrap()
+                .iter()
+                .map(|a| format!("{}\n", a))
+                .collect::<String>()
+        )
+    }
+
+    pub fn print_whitelisted(&self) -> String {
+        format!(
+            "There are {} addresses in whitelist:\n{}",
+            self.whitelist.read().unwrap().len(),
+            self.whitelist
+                .read()
+                .unwrap()
+                .iter()
+                .map(|a| format!("{}\n", a))
+                .collect::<String>()
+        )
+    }
+}
+
+pub struct Merino {
+    listener: TcpListener,
+    users: Arc<Vec<User>>,
+    auth_methods: Arc<Vec<u8>>,
+    lists: Arc<Lists>,
+    /// Timeout for connections
+    timeout: Option<Duration>,
+}
+
+impl Merino {
+    /// Create a new Merino instance
+    pub async fn new(
+        port: u16,
+        ip: &str,
+        auth_methods: Vec<u8>,
+        users: Vec<User>,
+        timeout: Option<Duration>,
+    ) -> io::Result<Self> {
+        info!("Listening on {}:{}", ip, port);
+        Ok(Merino {
+            listener: TcpListener::bind((ip, port)).await?,
+            auth_methods: Arc::new(auth_methods),
+            lists: Arc::new(Lists::new()),
+            users: Arc::new(users),
+            timeout,
+        })
+    }
+
+    pub async fn serve(&mut self) {
+        info!("Serving Connections...");
+        while let Ok((stream, client_addr)) = self.listener.accept().await {
+            let users = self.users.clone();
+            let auth_methods = self.auth_methods.clone();
+            let timeout = self.timeout;
+            let peer_ip = &stream.peer_addr().unwrap().ip();
+            // On Linux readeres preferred before writers. This shouls also immidiately release the lock.
+            // TODO: measure the delay
+            let whitelisted = self.lists.is_whitelisted(peer_ip);
+            let lists = self.lists.clone();
+
+            tokio::spawn(async move {
+                let mut client =
+                    auth::SOCKClient::new(stream, users, auth_methods, whitelisted, timeout);
+                match client.init().await {
+                    Ok(_) => {}
+                    Err(error) => {
+                        error!("Error! {:?}, client: {:?}", error, client_addr);
+
+                        if let MerinoError::Socks(e) = &error {
+                            if e == &ResponseCode::RuleFailure {
+                                lists.add_to_rejected(&client_addr.ip());
+                                //rejected_addresses.write().unwrap().insert(client_addr.ip());
+                            }
+                        }
+
+                        if let Err(e) = SocksReply::new(error.into()).send(&mut client.stream).await
+                        {
+                            warn!("Failed to send error code: {:?}", e);
+                        }
+
+                        if let Err(e) = client.shutdown().await {
+                            warn!("Failed to shutdown TcpStream: {:?}", e);
+                        };
+                    }
+                };
+            });
+        }
+    }
+
+    pub fn get_lists(&self) -> Arc<Lists> {
+        self.lists.clone()
     }
 }
 

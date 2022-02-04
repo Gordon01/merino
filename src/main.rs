@@ -168,29 +168,29 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let authed_users = authed_users?;
 
-    // Create proxy server
-    let mut merino = Merino::new(opt.port, &opt.ip, auth_methods, authed_users, None).await?;
-
-    let whitelist = merino.get_whitelist();
-    let rejected_addresses = merino.get_rejected_addresses();
-
     ctrlc::set_handler(move || {
         println!("received Ctrl+C!");
         std::process::exit(0);
     })
     .expect("Error setting Ctrl-C handler");
 
+    // Create proxy server
+    let mut merino = Merino::new(opt.port, &opt.ip, auth_methods, authed_users, None).await?;
+
     if let Some(whitelist_path) = opt.allowed_list {
         let whitelist_path = Path::new(&whitelist_path);
-        merino.load_whitelist(whitelist_path);
+        // PLZ help
+        info!("FIXME: load whitelist");
+        //merino.get_lists().load_whitelist(whitelist_path);
     }
+
+    //let whitelist = merino.get_whitelist();
+    //let rejected_addresses = merino.get_rejected_addresses();
+    let lists = merino.get_lists();
 
     if let Some(bot_path) = opt.bot {
         let bot_path = Path::new(&bot_path);
-        tokio::join!(
-            bot::start_bot(whitelist, rejected_addresses, bot_path.into()),
-            merino.serve()
-        );
+        tokio::join!(bot::start_bot(bot_path.into(), lists), merino.serve());
     } else {
         merino.serve().await;
     }
