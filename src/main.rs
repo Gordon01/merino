@@ -9,7 +9,9 @@ use merino::*;
 use std::env;
 use std::error::Error;
 use std::os::unix::prelude::MetadataExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+mod bot;
 
 /// Logo to be printed at when merino is run
 const LOGO: &str = r"
@@ -54,13 +56,25 @@ struct Opt {
     users: Option<PathBuf>,
 
     /// Log verbosity level. -vv for more verbosity.
-    /// Environmental variable `RUST_LOG` overrides this flag!
+    /// Environment variable `RUST_LOG` overrides this setting!
     #[clap(short, parse(from_occurrences))]
     verbosity: u8,
 
     /// Do not output any logs (even errors!). Overrides `RUST_LOG`
     #[clap(short)]
     quiet: bool,
+
+    /// Enable management via the Telegram bot. Provide a file with authentication token (first line).
+    /// Environment variable `TELOXIDE_TOKEN` overrides this setting!
+    /// Allowed list file must be provided if bot is enabled.
+    // TODO: find way #[clap(short, long, env="TELOXIDE_TOKEN")]
+    #[clap(short, long, requires = "allowed-list")]
+    bot: Option<String>,
+
+    /// Allowed list file. One IP per line. IPv4 and IPv6 are supported. 
+    /// For clients with addresses from this list, a NO_AUTH method would always be offered.
+    #[clap(short, long)]
+    allowed_list: Option<String>,
 }
 
 #[tokio::main]
@@ -157,8 +171,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Create proxy server
     let mut merino = Merino::new(opt.port, &opt.ip, auth_methods, authed_users, None).await?;
 
-    // Start Proxies
-    merino.serve().await;
+    let whitelist = merino.get_whitelist();
+    let rejected_addresses = merino.get_rejected_addresses();
+
+    ctrlc::set_handler(move || {
+        println!("received Ctrl+C!");
+        std::process::exit(0);
+    })
+    .expect("Error setting Ctrl-C handler");
+
+    if let Some(bot_path) = opt.bot {
+        // --bot depends on --allowed-list
+        let whitelist_path = opt.allowed_list.unwrap();
+        let whitelist_path = Path::new(&whitelist_path);
+        info!("FIXME: Bot path {} is not used!", &bot_path);
+        merino.load_whitelist(whitelist_path);
+        tokio::join!(
+            bot::start_bot(whitelist, rejected_addresses, whitelist_path.into()),
+            merino.serve()
+        );
+    } else {
+        merino.serve().await;
+    }
 
     Ok(())
 }

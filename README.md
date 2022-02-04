@@ -16,12 +16,14 @@
 
 ## 🎁 Features
 
-- Written in **100% Safe Rust**
+- Written in **100% Safe Rust**™
 - Multi-threaded connection handler
 - Lightweight (Less than 0.6% CPU usage while surfing the web/streaming YouTube)
 - Standalone binary (no system dependencies)
 - `1+ Gb/second` connection speeds (**On Gigabit LAN network over ethernet. Results may vary!**)
 - Tunable logging (by flags or `RUST_LOG` environmental variable)
+- Allowed list (NoAuth is always offered for such clients)
+- Telegram bot (access list manipulation)
 - `SOCKS5` Compatible Authentication methods:
   - `NoAuth`
   - Username & Password
@@ -51,6 +53,10 @@ merino --no-auth
 
 # Use username/password authentication and read users from users.csv
 merino --users users.csv
+
+# Use Telegram bot
+# `--bot` currently not used, pass `TELOXIDE_TOKEN` env variable wwith token
+TELOXIDE_TOKEN=111:AAA merino --bot bot.token -a allowed.txt
 
 # Display a help menu
 merino --help 
