@@ -71,7 +71,7 @@ struct Opt {
     #[clap(short, long, requires = "allowed-list")]
     bot: Option<String>,
 
-    /// Allowed list file. One IP per line. IPv4 and IPv6 are supported. 
+    /// Allowed list file. One IP per line. IPv4 and IPv6 are supported.
     /// For clients with addresses from this list, a NO_AUTH method would always be offered.
     #[clap(short, long)]
     allowed_list: Option<String>,
@@ -180,14 +180,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })
     .expect("Error setting Ctrl-C handler");
 
-    if let Some(bot_path) = opt.bot {
-        // --bot depends on --allowed-list
-        let whitelist_path = opt.allowed_list.unwrap();
+    if let Some(whitelist_path) = opt.allowed_list {
         let whitelist_path = Path::new(&whitelist_path);
-        info!("FIXME: Bot path {} is not used!", &bot_path);
         merino.load_whitelist(whitelist_path);
+    }
+
+    if let Some(bot_path) = opt.bot {
+        let bot_path = Path::new(&bot_path);
         tokio::join!(
-            bot::start_bot(whitelist, rejected_addresses, whitelist_path.into()),
+            bot::start_bot(whitelist, rejected_addresses, bot_path.into()),
             merino.serve()
         );
     } else {
