@@ -39,6 +39,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     /// Create a new SOCKClient with no auth
     pub fn new_no_auth(stream: T, timeout: Option<Duration>) -> Self {
         // FIXME: use option here
@@ -57,6 +58,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     /// Mutable getter for inner stream
     pub fn stream_mut(&mut self) -> &mut T {
         &mut self.stream
