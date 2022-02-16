@@ -21,6 +21,50 @@ enum Command {
     Add(String),
 }
 
+fn add_ip_to_whitelist(
+    ip: IpAddr,
+    whitelist: Arc<RwLock<HashSet<IpAddr>>>,
+    whitelist_file: Arc<Path>,
+) -> String {
+    let contains = {
+        let mut whitelist = whitelist.write().unwrap();
+        let contains = whitelist.contains(&ip);
+        whitelist.insert(ip);
+        contains
+    };
+
+    if contains {
+        format!("IP {} is already in whitelist", ip)
+    } else {
+        let message: String = {
+            match OpenOptions::new().append(true).open(whitelist_file) {
+                Ok(mut file) => {
+                    let message = if file.metadata().unwrap().len() > 0 {
+                        format!("\n{}", ip)
+                    } else {
+                        format!("{}", ip)
+                    };
+
+                    match file.write(message.as_bytes()) {
+                        Ok(_) => format!("IP {} is added to whitelist", ip),
+                        Err(e) => format!(
+                            "IP {} is added to whitelist, but not saved to file, because: {:?}",
+                            ip, e
+                        ),
+                    }
+                }
+                Err(e) => format!(
+                    "IP {} is added to whitelist, but not saved to file, because: {:?}",
+                    ip, e
+                ),
+            }
+        };
+
+        info!("{}", message);
+        message
+    }
+}
+
 /// Parse the text wrote on Telegram and check if that text is a valid command
 /// or not, then match the command.
 async fn message_handler(
@@ -59,41 +103,12 @@ async fn message_handler(
                         .collect::<String>()
                 )
             }
-            Ok(Command::Add(ip)) => match ip.parse::<IpAddr>() {
-                Ok(ip) => {
-                    let contains = {
-                        let mut whitelist = whitelist.write().unwrap();
-                        let contains = whitelist.contains(&ip);
-                        whitelist.insert(ip);
-                        contains
-                    };
-                    if contains {
-                        format!("IP {} is already in whitelist", ip)
-                    } else {
-                        let message: String = {
-                            let file = OpenOptions::new().append(true).open(whitelist_file);
-                            if file.is_err() {
-                                format!("IP {} is added to whitelist, but not saved to file", ip)
-                            } else {
-                                match file.unwrap().write(format!("\n{}", ip).as_bytes()) {
-                                        Ok(_) => format!("IP {} is added to whitelist", ip),
-                                        Err(e) => format!("IP {} is added to whitelist, but not saved to file, because: {:?}", ip, e),
-                                    }
-                            }
-                        };
-
-                        info!("{}", message);
-                        message
-                    }
-                }
-                Err(e) => {
-                    format!("IP cannot be parsed: {}", e)
-                }
+            Ok(Command::Add(ip)) => match ip.trim().parse::<IpAddr>() {
+                Ok(ip) => add_ip_to_whitelist(ip, whitelist, whitelist_file),
+                Err(e) => format!("IP cannot be parsed: {}", e),
             },
 
-            Err(_) => {
-                "Command not found!".to_string()
-            }
+            Err(_) => "Command not found!".to_string(),
         };
 
         cx.reply_to(message).await?;
