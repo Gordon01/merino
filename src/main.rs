@@ -8,6 +8,7 @@ use clap::{ArgGroup, Parser};
 use merino::*;
 use std::env;
 use std::error::Error;
+#[cfg(not(target_os = "windows"))]
 use std::os::unix::prelude::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -71,7 +72,7 @@ struct Opt {
     #[clap(short, long, requires = "allowed-list")]
     bot: Option<String>,
 
-    /// Allowed list file. One IP per line. IPv4 and IPv6 are supported. 
+    /// Allowed list file. One IP per line. IPv4 and IPv6 are supported.
     /// For clients with addresses from this list, a NO_AUTH method would always be offered.
     #[clap(short, long)]
     allowed_list: Option<String>,
@@ -124,17 +125,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 std::process::exit(1);
             });
 
-            let metadata = file.metadata()?;
-            // 7 is (S_IROTH | S_IWOTH | S_IXOTH) or the "permisions for others" in unix
-            if (metadata.mode() & 7) > 0 && !opt.allow_insecure {
-                error!(
-                    "Permissions {:o} for {:?} are too open. \
+            #[cfg(not(target_os = "windows"))]
+            {
+                let metadata = file.metadata()?;
+                // 7 is (S_IROTH | S_IWOTH | S_IXOTH) or the "permisions for others" in unix
+                if (metadata.mode() & 7) > 0 && !opt.allow_insecure {
+                    error!(
+                        "Permissions {:o} for {:?} are too open. \
                     It is recommended that your users file is NOT accessible by others. \
                     To override this check, set --allow-insecure",
-                    metadata.mode() & 0o777,
-                    &users_file
-                );
-                std::process::exit(1);
+                        metadata.mode() & 0o777,
+                        &users_file
+                    );
+                    std::process::exit(1);
+                }
             }
 
             let mut users: Vec<User> = Vec::new();
